@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import constants
 from scipy.signal import stft
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
 
 """
 We use a kaiser window to balance the main-lobe width and side lobe level. 
@@ -9,6 +11,33 @@ see here, ~https://numpy.org/doc/stable/reference/generated/numpy.kaiser.html#nu
 as well, ~https://en.wikipedia.org/wiki/Window_function~
 """
 window_np = lambda tnp,nw: np.array([tnp[...,0],np.kaiser(len(tnp),nw)*tnp[...,1]]).T
+
+def  bg_als_opt(y,lam,p,dorder):
+    """
+    Baseline correction for removing 'untrue' low-frequency components due to the signal instability. 
+    Method:'Paul H. C. Eilers, Parametric Time Warping  Anal. Chem. 2004, 76, 2, 404 - 411 ' ~pubs.acs.org/doi/10.1021/ac034800e~
+    codes are from ~https://stackoverflow.com/questions/29156532/python-baseline-correction-library~ 
+    python should have a package of symmetric baseline correction by least-squares as well 
+
+    Given a column of data y,
+    it needs three parameters to correct the baseline
+    lam: \lambda, smoothness, 10**x. works with exponential order. 
+    p: possibility. 0-1.0.  0.5 is symmetric for top and bottom sides. 0 is at the bottom, 1 is at the top of the spectrum
+    dorder: control polyorder of the differential order.
+    The background curve is returned by the function. 
+    """
+    niter = 10   # iteration number to solve the least-square equation.
+    L = len(y)
+    D = sparse.csr_matrix(np.diff(np.eye(L),n=dorder))     # build up a compressed sparse matrix of difference polynomials  
+    D = lam * D.dot(D.transpose())   # add smoothness and calculate the D^2
+    w = np.ones(L)  # one matrix of the y intensity 
+    W = sparse.spdiags(w, 0, L, L)   # build up a sparse matrix to for off diangnol part
+    for i in range(niter):
+        W.setdiag(w)
+        Z = W + D  # sum up diagnol and offdiagnol parts.
+        z = spsolve(Z, w*y)   # solve the least-square mean
+        w = p * (y > z) + (1-p) * (y < z)  # give the weight of the up and down parts, and go into the second iteration.
+    return z
 
 def fft_tau2freq(tnp,Zpad): 
     """
